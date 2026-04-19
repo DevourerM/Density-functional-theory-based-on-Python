@@ -1,0 +1,6 @@
+"""项目中共用的常量定义。"""
+
+ANGSTROM_TO_BOHR = 1.8897261254578281
+ALLOWED_XC_FUNCTIONALS = frozenset({"LDA", "PBE"})
+ALLOWED_MIXING_METHODS = frozenset({"linear", "DIIS"})
+ALLOWED_EIGENSOLVER_METHODS = frozenset({"LOBPCG", "DAVIDSON"})
