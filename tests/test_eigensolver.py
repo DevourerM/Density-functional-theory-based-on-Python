@@ -42,7 +42,6 @@ class IterativeEigenSolverTest(unittest.TestCase):
             hamiltonian,
             4,
             solver_config=本征求解配置(
-                method="LOBPCG",
                 tolerance=1.0e-9,
                 max_iterations=80,
                 random_seed=7,

@@ -159,7 +159,29 @@ class MixingConfig:
 
     method: str
     linear_coefficient: float
-    diis_history_steps: int
+
+
+@dataclass(slots=True, frozen=True)
+class KPoint:
+    """保存一个采用倒格矢分数坐标表示的 k 点及其权重。"""
+
+    fractional_coordinates: tuple[float, float, float]
+    weight: float
+
+    @property
+    def reduced_coordinates(self) -> tuple[float, float, float]:
+        """返回 reduced 坐标。"""
+
+        return self.fractional_coordinates
+
+
+@dataclass(slots=True, frozen=True)
+class OccupationSettings:
+    """保存周期固体占据设置。"""
+
+    method: str
+    smearing_width_hartree: float
+    spin_degeneracy: float = 2.0
 
 
 @dataclass(slots=True, frozen=True)
@@ -168,7 +190,6 @@ class SCFSettings:
 
     max_iterations: int
     scf_tolerance: float
-    wavefunction_tolerance: float
     mixing: MixingConfig
 
 
@@ -179,6 +200,8 @@ class NumericalSettings:
     grid: GridSpec
     xc_functional: str
     nbands: int
+    kpoints: tuple[KPoint, ...]
+    occupations: OccupationSettings
 
 
 @dataclass(slots=True, frozen=True)
@@ -202,6 +225,12 @@ class InputConfig:
         """返回每种元素对应的原子数。"""
 
         return dict(Counter(site.element for site in self.crystal.atom_sites))
+
+    @property
+    def kpoint_count(self) -> int:
+        """返回 k 点数。"""
+
+        return len(self.numerical.kpoints)
 
 
 @dataclass(slots=True, frozen=True)
@@ -314,7 +343,6 @@ class RuntimeContext:
     real_space_grid: RealSpaceGrid
     total_valence_electrons: float
     minimum_occupied_bands: int
-    ion_ion_ewald_hartree: float
     density_grid: DensityGrid
     hamiltonian_components: HamiltonianComponents
     hamiltonian: HamiltonianOperator
@@ -326,9 +354,6 @@ class RuntimeContext:
             f"{element}:{info.file_path.name}"
             for element, info in sorted(self.pseudopotentials.items())
         )
-        nonlocal_projector_count = 0
-        if self.hamiltonian_components.nonlocal_pseudopotential is not None:
-            nonlocal_projector_count = self.hamiltonian_components.nonlocal_pseudopotential.projector_count
 
         return "\n".join(
             [
@@ -338,13 +363,22 @@ class RuntimeContext:
                 f"赝势映射: {pseudopotential_summary}",
                 f"总价电子数: {self.total_valence_electrons:.6f}",
                 f"最小占据轨道数: {self.minimum_occupied_bands}",
-                f"离子-离子 Ewald 能 (Ha): {self.ion_ion_ewald_hartree:.12f}",
                 f"输入轨道数 nbands: {self.config.numerical.nbands}",
+                f"k 点数: {self.config.kpoint_count}",
+                "k 点权重和: {:.6f}".format(
+                    sum(kpoint.weight for kpoint in self.config.numerical.kpoints)
+                ),
+                (
+                    "占据设置: {} smearing={:.6e} Ha spin_deg={:.1f}".format(
+                        self.config.numerical.occupations.method,
+                        self.config.numerical.occupations.smearing_width_hartree,
+                        self.config.numerical.occupations.spin_degeneracy,
+                    )
+                ),
                 f"电荷密度网格: {self.density_grid.grid_shape}",
                 f"均匀初始密度: {self.density_grid.uniform_density:.6e}",
                 f"电荷积分检查: {self.density_grid.integrated_electrons:.6f}",
                 f"动能差分模板: {self.hamiltonian_components.kinetic.stencil_point_count} 点",
-                f"非局域 projector 数: {nonlocal_projector_count}",
                 "离子局域势范围: [{:.6e}, {:.6e}]".format(
                     self.hamiltonian_components.ionic_local_potential.min_value,
                     self.hamiltonian_components.ionic_local_potential.max_value,
@@ -358,6 +392,6 @@ class RuntimeContext:
                     self.hamiltonian_components.exchange_correlation_potential.max_value,
                 ),
                 f"XC 实现说明: {self.hamiltonian_components.exchange_correlation_model}",
-                f"非局域赝势状态: {self.hamiltonian_components.nonlocal_pseudopotential_note}",
+                f"非局域赝势说明: {self.hamiltonian_components.nonlocal_pseudopotential_note}",
             ]
         )

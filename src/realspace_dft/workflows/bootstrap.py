@@ -10,7 +10,6 @@ from ..config.input_parser import 加载输入参数
 from ..core.models import InputConfig, PseudopotentialInfo, RuntimeContext
 from ..mesh.density import 初始化电荷密度网格
 from ..mesh.geometry import 构造实空间网格
-from ..physics.ewald import 计算离子离子Ewald能
 from ..physics.hamiltonian import 构造哈密顿算符
 from ..physics.pseudopotential import 载入所需赝势
 
@@ -41,7 +40,6 @@ def 初始化计算上下文(input_path: str | Path = "INPUT.json") -> RuntimeCo
     real_space_grid = 构造实空间网格(config.crystal, config.numerical.grid)
     total_valence_electrons = _计算总价电子数(config, pseudopotentials)
     minimum_occupied_bands = _估算最小占据轨道数(total_valence_electrons)
-    ion_ion_ewald_hartree = 计算离子离子Ewald能(config.crystal, pseudopotentials)
 
     if config.numerical.nbands < minimum_occupied_bands:
         raise DFTInputError(
@@ -69,7 +67,6 @@ def 初始化计算上下文(input_path: str | Path = "INPUT.json") -> RuntimeCo
         real_space_grid=real_space_grid,
         total_valence_electrons=total_valence_electrons,
         minimum_occupied_bands=minimum_occupied_bands,
-        ion_ion_ewald_hartree=ion_ion_ewald_hartree,
         density_grid=density_grid,
         hamiltonian_components=hamiltonian_components,
         hamiltonian=hamiltonian,

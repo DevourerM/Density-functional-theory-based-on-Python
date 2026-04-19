@@ -1,4 +1,4 @@
-"""基于稀疏迭代方法的波函数本征求解。"""
+"""基于 LOBPCG 的最小块本征求解。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
-from scipy import sparse
 from scipy.sparse.linalg import LinearOperator, aslinearoperator, lobpcg
 
 from ..config.constants import ALLOWED_EIGENSOLVER_METHODS
@@ -17,7 +16,7 @@ from ..core.models import ComplexArray, FloatArray
 if TYPE_CHECKING:
     from ..core.models import RealSpaceGrid
 
-HamiltonianLike = LinearOperator | sparse.spmatrix | np.ndarray
+HamiltonianLike = LinearOperator | np.ndarray
 
 
 @dataclass(slots=True, frozen=True)
@@ -29,7 +28,6 @@ class IterativeEigenSolverConfig:
     max_iterations: int = 200
     largest: bool = False
     random_seed: int = 0
-    use_preconditioner: bool = True
     verbosity_level: int = 0
 
     @property
@@ -73,12 +71,12 @@ class IterativeEigenSolverResult:
         return bool(np.all(np.isfinite(self.final_residual_norms)))
 
     def wavefunctions_as_grids(self) -> ComplexArray:
-        """把波函数恢复成 (nbands, nx, ny, nz) 形状。"""
+        """把波函数恢复成 (nx, ny, nz, nbands) 形状。"""
 
         if self.grid_shape is None:
             raise ValueError("当前结果不包含网格形状，无法恢复三维波函数。")
 
-        return self.eigenvectors.T.reshape((self.nbands,) + self.grid_shape, order="C")
+        return self.eigenvectors.reshape(self.grid_shape + (self.nbands,), order="C")
 
     def overlap_matrix(self) -> ComplexArray:
         """返回波函数的重叠矩阵。"""
@@ -100,9 +98,9 @@ class BaseBandEigenSolver(ABC):
         self,
         hamiltonian: HamiltonianLike,
         nbands: int,
-        initial_subspace: np.ndarray | None = None,
     ) -> IterativeEigenSolverResult:
         """求解最低若干个本征态。"""
+
 
 
 def _as_linear_operator(hamiltonian: HamiltonianLike) -> LinearOperator:
@@ -134,6 +132,7 @@ def _as_linear_operator(hamiltonian: HamiltonianLike) -> LinearOperator:
     )
 
 
+
 def _extract_grid(hamiltonian: HamiltonianLike) -> RealSpaceGrid | None:
     """尝试从哈密顿量对象中提取网格信息。"""
 
@@ -143,13 +142,13 @@ def _extract_grid(hamiltonian: HamiltonianLike) -> RealSpaceGrid | None:
     return grid
 
 
+
 def _prepare_initial_subspace(
     operator: LinearOperator,
     nbands: int,
     random_seed: int,
-    initial_subspace: np.ndarray | None,
 ) -> np.ndarray:
-    """构造并正交化初始子空间。"""
+    """构造并正交化随机初始子空间。"""
 
     if operator.shape[0] != operator.shape[1]:
         raise DFTInputError("哈密顿量必须是方阵算符。")
@@ -162,69 +161,14 @@ def _prepare_initial_subspace(
 
     operator_dtype = np.dtype(operator.dtype or np.float64)
     is_complex = np.issubdtype(operator_dtype, np.complexfloating)
+    rng = np.random.default_rng(random_seed)
+    block = rng.standard_normal((dimension, nbands))
+    if is_complex:
+        block = block + 1j * rng.standard_normal((dimension, nbands))
 
-    if initial_subspace is None:
-        rng = np.random.default_rng(random_seed)
-        block = rng.standard_normal((dimension, nbands))
-        if is_complex:
-            block = block + 1j * rng.standard_normal((dimension, nbands))
-        initial_block = block.astype(operator_dtype, copy=False)
-    else:
-        initial_block = np.asarray(initial_subspace, dtype=operator_dtype)
-        if initial_block.shape == (nbands, dimension):
-            initial_block = initial_block.T
-        if initial_block.shape != (dimension, nbands):
-            raise DFTInputError(
-                "初始子空间形状必须是 (哈密顿量维度, nbands) 或其转置。"
-            )
-
-    q_matrix, _ = np.linalg.qr(initial_block, mode="reduced")
+    q_matrix, _ = np.linalg.qr(block.astype(operator_dtype, copy=False), mode="reduced")
     return q_matrix.astype(operator_dtype, copy=False)
 
-
-def _extract_diagonal_approximation(hamiltonian: HamiltonianLike) -> np.ndarray | None:
-    """尽可能从哈密顿量中提取对角近似。"""
-
-    if hasattr(hamiltonian, "approximate_diagonal"):
-        diagonal = np.asarray(getattr(hamiltonian, "approximate_diagonal")(), dtype=np.float64)
-        return diagonal
-
-    if sparse.isspmatrix(hamiltonian):
-        return np.asarray(hamiltonian.diagonal(), dtype=np.float64)
-
-    if isinstance(hamiltonian, np.ndarray):
-        return np.asarray(np.diag(hamiltonian), dtype=np.float64)
-
-    return None
-
-
-def _build_jacobi_preconditioner(hamiltonian: HamiltonianLike) -> LinearOperator | None:
-    """使用哈密顿量对角近似构造 Jacobi 预条件器。"""
-
-    diagonal = _extract_diagonal_approximation(hamiltonian)
-    if diagonal is None:
-        return None
-
-    safe_diagonal = np.where(np.abs(diagonal) > 1.0e-10, diagonal, np.sign(diagonal) + 1.0e-10)
-    inverse_diagonal = 1.0 / safe_diagonal.astype(np.complex128)
-
-    def matvec(vector: np.ndarray) -> np.ndarray:
-        flattened_vector = np.asarray(vector, dtype=np.complex128).reshape(-1)
-        return inverse_diagonal * flattened_vector
-
-    def matmat(matrix: np.ndarray) -> np.ndarray:
-        matrix_array = np.asarray(matrix, dtype=np.complex128)
-        if matrix_array.ndim == 1:
-            return inverse_diagonal * matrix_array
-        return inverse_diagonal[:, np.newaxis] * matrix_array
-
-    dimension = diagonal.size
-    return LinearOperator(
-        shape=(dimension, dimension),
-        matvec=matvec,
-        matmat=matmat,
-        dtype=np.complex128,
-    )
 
 
 def _physically_normalize_eigenvectors(
@@ -243,6 +187,7 @@ def _physically_normalize_eigenvectors(
     return normalized
 
 
+
 def _coerce_real_array(values: np.ndarray | list[np.ndarray]) -> np.ndarray:
     """把理论上应为实数的结果安全转换为 float 数组。"""
 
@@ -259,24 +204,17 @@ class LOBPCGBandEigenSolver(BaseBandEigenSolver):
         self,
         hamiltonian: HamiltonianLike,
         nbands: int,
-        initial_subspace: np.ndarray | None = None,
     ) -> IterativeEigenSolverResult:
         operator = _as_linear_operator(hamiltonian)
         initial_block = _prepare_initial_subspace(
             operator=operator,
             nbands=nbands,
             random_seed=self.config.random_seed,
-            initial_subspace=initial_subspace,
         )
-
-        preconditioner = None
-        if self.config.use_preconditioner:
-            preconditioner = _build_jacobi_preconditioner(hamiltonian)
 
         eigenvalues, eigenvectors, lambda_history, residual_history = lobpcg(
             operator,
             initial_block,
-            M=preconditioner,
             largest=self.config.largest,
             tol=self.config.tolerance,
             maxiter=self.config.max_iterations,
@@ -310,19 +248,6 @@ class LOBPCGBandEigenSolver(BaseBandEigenSolver):
         )
 
 
-class DavidsonBandEigenSolver(BaseBandEigenSolver):
-    """为后续 Davidson 求解器保留统一接口。"""
-
-    def solve(
-        self,
-        hamiltonian: HamiltonianLike,
-        nbands: int,
-        initial_subspace: np.ndarray | None = None,
-    ) -> IterativeEigenSolverResult:
-        raise UnsupportedEigenSolverError(
-            "Davidson 求解器接口已预留，但当前版本尚未实现。"
-        )
-
 
 def create_band_eigensolver(
     config: IterativeEigenSolverConfig | None = None,
@@ -334,13 +259,10 @@ def create_band_eigensolver(
     if normalized_method not in ALLOWED_EIGENSOLVER_METHODS:
         allowed_methods = ", ".join(sorted(ALLOWED_EIGENSOLVER_METHODS))
         raise DFTInputError(f"本征求解器方法仅支持: {allowed_methods}")
+    if normalized_method != "LOBPCG":
+        raise UnsupportedEigenSolverError(f"未知的本征求解器方法: {normalized_method}")
+    return LOBPCGBandEigenSolver(solver_config)
 
-    if normalized_method == "LOBPCG":
-        return LOBPCGBandEigenSolver(solver_config)
-    if normalized_method == "DAVIDSON":
-        return DavidsonBandEigenSolver(solver_config)
-
-    raise UnsupportedEigenSolverError(f"未知的本征求解器方法: {normalized_method}")
 
 
 def 求解本征波函数(
@@ -348,16 +270,14 @@ def 求解本征波函数(
     nbands: int,
     *,
     solver_config: IterativeEigenSolverConfig | None = None,
-    initial_subspace: np.ndarray | None = None,
 ) -> IterativeEigenSolverResult:
     """以哈密顿量为输入，求解最低若干个 band 的波函数。"""
 
     solver = create_band_eigensolver(solver_config)
-    return solver.solve(hamiltonian, nbands, initial_subspace=initial_subspace)
+    return solver.solve(hamiltonian, nbands)
 
 
 本征求解配置 = IterativeEigenSolverConfig
 本征求解结果 = IterativeEigenSolverResult
 LOBPCG波函数求解器 = LOBPCGBandEigenSolver
-Davidson波函数求解器 = DavidsonBandEigenSolver
 创建波函数求解器 = create_band_eigensolver

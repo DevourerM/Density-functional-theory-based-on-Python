@@ -9,16 +9,26 @@ import numpy as np
 try:
     from scipy.special import sph_harm as _scipy_spherical_harmonic
 
-    def _复球谐函数(magnetic_index: int, angular_momentum: int, azimuth: np.ndarray, polar: np.ndarray) -> np.ndarray:
+    def _复球谐函数(
+        magnetic_index: int,
+        angular_momentum: int,
+        azimuth: np.ndarray,
+        polar: np.ndarray,
+    ) -> np.ndarray:
         return _scipy_spherical_harmonic(magnetic_index, angular_momentum, azimuth, polar)
 
 except ImportError:
     from scipy.special import sph_harm_y as _scipy_spherical_harmonic_y
 
-    def _复球谐函数(magnetic_index: int, angular_momentum: int, azimuth: np.ndarray, polar: np.ndarray) -> np.ndarray:
+    def _复球谐函数(
+        magnetic_index: int,
+        angular_momentum: int,
+        azimuth: np.ndarray,
+        polar: np.ndarray,
+    ) -> np.ndarray:
         return _scipy_spherical_harmonic_y(angular_momentum, magnetic_index, polar, azimuth)
 
-from ..core.models import AtomSite, ComplexArray, PseudopotentialInfo, RealSpaceGrid
+from ..core.models import AtomSite, ComplexArray, KPoint, PseudopotentialInfo, RealSpaceGrid
 
 
 @dataclass(slots=True)
@@ -32,6 +42,8 @@ class AtomicNonlocalProjectorBlock:
 
     @property
     def projector_count(self) -> int:
+        """返回该原子展开后的 projector 数。"""
+
         return int(self.projector_matrix.shape[1])
 
 
@@ -45,6 +57,8 @@ class NonlocalPseudopotentialOperator:
 
     @property
     def projector_count(self) -> int:
+        """返回所有原子总展开 projector 数。"""
+
         return sum(block.projector_count for block in self.blocks)
 
     def _compute_diagonal_approximation(self) -> np.ndarray:
@@ -60,9 +74,13 @@ class NonlocalPseudopotentialOperator:
         return diagonal
 
     def approximate_diagonal(self) -> np.ndarray:
+        """返回非局域算符的对角近似。"""
+
         return self._diagonal_approximation.copy()
 
     def apply_to_grid(self, wavefunction_grid: ComplexArray) -> ComplexArray:
+        """把非局域赝势项作用到单个或一组三维波函数上。"""
+
         psi = np.asarray(wavefunction_grid, dtype=np.complex128)
         if psi.ndim == 3:
             psi_matrix = self.grid.flatten_values(psi).reshape(self.grid.point_count, 1)
@@ -81,9 +99,12 @@ class NonlocalPseudopotentialOperator:
         return self.grid.reshape_wavefunctions(result_matrix)
 
     def expectation_per_band(self, wavefunction_grids: ComplexArray) -> np.ndarray:
+        """返回每个波函数对非局域赝势的能量期望。"""
+
         psi = np.asarray(wavefunction_grids, dtype=np.complex128)
         if psi.ndim != 4:
             raise ValueError("非局域赝势能量期望需要一组波函数块。")
+
         applied = self.apply_to_grid(psi)
         psi_matrix = self.grid.flatten_values(psi)
         applied_matrix = self.grid.flatten_values(applied)
@@ -92,7 +113,11 @@ class NonlocalPseudopotentialOperator:
         )
 
 
-def _插值径向projector(distances: np.ndarray, pseudopotential: PseudopotentialInfo, projector_index: int) -> np.ndarray:
+def _插值径向projector(
+    distances: np.ndarray,
+    pseudopotential: PseudopotentialInfo,
+    projector_index: int,
+) -> np.ndarray:
     projector = pseudopotential.nonlocal_projectors[projector_index]
     radial_grid = np.asarray(pseudopotential.radial_grid_bohr, dtype=np.float64)
     radial_values = np.asarray(projector.radial_values, dtype=np.float64)
@@ -106,19 +131,48 @@ def _插值径向projector(distances: np.ndarray, pseudopotential: Pseudopotenti
     return np.where(distances <= projector.cutoff_radius_bohr, interpolated, 0.0)
 
 
-def _build_expanded_projector_block(
+def _构造单原子非局域projector块(
     real_space_grid: RealSpaceGrid,
     atom_site: AtomSite,
     pseudopotential: PseudopotentialInfo,
+    kpoint: KPoint,
 ) -> AtomicNonlocalProjectorBlock | None:
     if not pseudopotential.has_nonlocal_projectors:
         return None
 
-    dx, dy, dz = real_space_grid.minimum_image_displacements_bohr(atom_site.fractional_position)
+    raw_delta_u = real_space_grid.fractional_coordinate_arrays[0] - atom_site.fractional_position[0]
+    raw_delta_v = real_space_grid.fractional_coordinate_arrays[1] - atom_site.fractional_position[1]
+    raw_delta_w = real_space_grid.fractional_coordinate_arrays[2] - atom_site.fractional_position[2]
+    image_u = np.rint(raw_delta_u)
+    image_v = np.rint(raw_delta_v)
+    image_w = np.rint(raw_delta_w)
+    delta_u = raw_delta_u - image_u
+    delta_v = raw_delta_v - image_v
+    delta_w = raw_delta_w - image_w
+
+    dx = (
+        delta_u * real_space_grid.cell_matrix_bohr[0, 0]
+        + delta_v * real_space_grid.cell_matrix_bohr[1, 0]
+        + delta_w * real_space_grid.cell_matrix_bohr[2, 0]
+    )
+    dy = (
+        delta_u * real_space_grid.cell_matrix_bohr[0, 1]
+        + delta_v * real_space_grid.cell_matrix_bohr[1, 1]
+        + delta_w * real_space_grid.cell_matrix_bohr[2, 1]
+    )
+    dz = (
+        delta_u * real_space_grid.cell_matrix_bohr[0, 2]
+        + delta_v * real_space_grid.cell_matrix_bohr[1, 2]
+        + delta_w * real_space_grid.cell_matrix_bohr[2, 2]
+    )
     distances = np.sqrt(dx * dx + dy * dy + dz * dz)
     safe_distances = np.where(distances > 1.0e-14, distances, 1.0)
     polar_angle = np.arccos(np.clip(dz / safe_distances, -1.0, 1.0))
     azimuthal_angle = np.mod(np.arctan2(dy, dx), 2.0 * np.pi)
+    reduced_kx, reduced_ky, reduced_kz = kpoint.fractional_coordinates
+    bloch_phase = np.exp(
+        -2.0j * np.pi * (reduced_kx * image_u + reduced_ky * image_v + reduced_kz * image_w)
+    )
 
     expanded_projectors: list[np.ndarray] = []
     expanded_labels: list[str] = []
@@ -126,21 +180,26 @@ def _build_expanded_projector_block(
     for projector_index, projector in enumerate(pseudopotential.nonlocal_projectors):
         radial_values = _插值径向projector(distances, pseudopotential, projector_index)
         for magnetic_index in range(-projector.angular_momentum, projector.angular_momentum + 1):
-            angular_part = _复球谐函数(
-                magnetic_index,
-                projector.angular_momentum,
-                azimuthal_angle,
-                polar_angle,
-            )
-            angular_part = np.where(distances > 1.0e-14, angular_part, 0.0)
             if projector.angular_momentum == 0:
-                angular_part = np.full_like(angular_part, 1.0 / np.sqrt(4.0 * np.pi), dtype=np.complex128)
-            projector_field = radial_values.astype(np.complex128) * angular_part.astype(np.complex128)
+                angular_part = np.full(distances.shape, 1.0 / np.sqrt(4.0 * np.pi), dtype=np.complex128)
+            else:
+                angular_part = _复球谐函数(
+                    magnetic_index,
+                    projector.angular_momentum,
+                    azimuthal_angle,
+                    polar_angle,
+                ).astype(np.complex128)
+                angular_part = np.where(distances > 1.0e-14, angular_part, 0.0)
+
+            projector_field = radial_values.astype(np.complex128) * angular_part * bloch_phase
             expanded_projectors.append(projector_field.reshape(-1, order="C"))
             expanded_labels.append(
                 f"{atom_site.element}_beta{projector.index}_l{projector.angular_momentum}_m{magnetic_index}"
             )
             expanded_metadata.append((projector_index, projector.angular_momentum, magnetic_index))
+
+    if not expanded_projectors:
+        return None
 
     projector_matrix = np.column_stack(expanded_projectors).astype(np.complex128)
     coupling_dimension = projector_matrix.shape[1]
@@ -164,15 +223,17 @@ def 构造非局域赝势算符(
     real_space_grid: RealSpaceGrid,
     atom_sites: tuple[AtomSite, ...],
     pseudopotentials: dict[str, PseudopotentialInfo],
+    kpoint: KPoint,
 ) -> NonlocalPseudopotentialOperator | None:
     """根据原子与赝势信息构造矩阵自由的非局域赝势算符。"""
 
     blocks: list[AtomicNonlocalProjectorBlock] = []
     for atom_site in atom_sites:
-        block = _build_expanded_projector_block(
+        block = _构造单原子非局域projector块(
             real_space_grid,
             atom_site,
             pseudopotentials[atom_site.element],
+            kpoint,
         )
         if block is not None:
             blocks.append(block)

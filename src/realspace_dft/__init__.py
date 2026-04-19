@@ -2,7 +2,7 @@
 
 from .config.input_parser import 加载输入参数
 from .mesh.geometry import 构造实空间网格
-from .physics.density import 由波函数计算电荷密度, 计算轨道占据
+from .physics.density import 由k点波函数计算电荷密度, 由波函数计算电荷密度, 计算费米能与占据, 计算轨道占据
 from .physics.hamiltonian import 构造哈密顿算符
 from .solvers.eigen import (
 	IterativeEigenSolverConfig,
@@ -36,7 +36,9 @@ __all__ = [
 	"加载输入参数",
 	"构造实空间网格",
 	"构造哈密顿算符",
+	"由k点波函数计算电荷密度",
 	"由波函数计算电荷密度",
+	"计算费米能与占据",
 	"计算轨道占据",
 	"求解本征波函数",
 	"本征求解结果",

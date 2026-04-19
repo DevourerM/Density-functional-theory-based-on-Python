@@ -1,33 +1,33 @@
 # Density-functional-theory-based-on-Python
 
-这是一个基于 Python 的三维实空间 Kohn-Sham DFT SCF 程序。当前版本已经可以作为一个可直接运行的单 Γ 点周期性 DFT SCF 软件使用，支持从 INPUT.json 读取结构与数值参数，执行自洽迭代，并输出 TensorBoard 日志、最终电荷密度和总能摘要。
+这是一个面向周期固体自洽场闭环的三维实空间 Kohn-Sham DFT 原型程序。当前版本主路径包含显式 k 点、UPF 局域与非局域赝势、FFT Hartree 势、交换关联势、LOBPCG 本征求解、费米分数占据和线性密度混合。
 
 ## 当前能力
 
-- 三维周期性实空间网格离散
-- 矩阵自由动能算符
+- 三维周期性实空间均匀网格离散
+- 固定 7 点有限差分动能算符
 - UPF 局域赝势读取与插值
-- UPF 非局域 Kleinman-Bylander projector 项
+- UPF 非局域 projector 读取、球谐展开与 Kleinman-Bylander 低秩作用
 - Hartree 势 FFT 泊松求解
 - LDA 与 PBE 交换关联势/能量
 - LOBPCG 波函数迭代求解
-- 线性混合与 DIIS 密度混合
-- SCF 过程中记录密度残差、波函数残差、总能变化
-- 离子-离子 Ewald 常数项，输出可比较的晶体总能
-- TensorBoard 可视化
-- 最终电荷密度和 SCF 摘要保存
+- 显式 reduced k 点与权重输入
+- 费米-狄拉克分数占据与费米能搜索
+- 线性密度混合
+- 基于密度残差和能级变化的最小 SCF 收敛判据
+- TensorBoard 迭代可视化
+- 最终电荷密度 txt 导出
 
 ## 当前限制
 
-当前版本仍然是教学型/研究原型实现，已经可用于小体系的 SCF 试算，但还没有以下能力：
+当前版本明确不包含以下增强功能：
 
-- 仅支持单 Γ 点，不支持一般 k 点采样
-- 仅支持非自旋极化，不支持自旋分辨密度
-- 未实现原子力、应力、结构优化和分子动力学
-- Davidson 求解器接口已预留，但当前未实现
-- 未实现 smearing、费米能搜索和金属体系专用占据策略
+- DIIS 混合
+- Davidson 求解器
+- Ewald 离子-离子常数项
+- 自旋、力、应力、结构优化和对称性约简
 
-如果你的目标是做小型绝缘体/半导体单胞的实空间 SCF 试算，这个版本已经可以直接跑通完整流程。
+如果你的目标是跑通一个最小、直接、可读的实空间 SCF 流程，这个版本就是当前仓库的主实现。
 
 ## 安装
 
@@ -40,7 +40,7 @@ python -m pip install -U pip
 python -m pip install -e .
 ```
 
-项目依赖由 pyproject.toml 管理，当前核心依赖为：
+项目当前核心依赖为：
 
 - numpy
 - scipy
@@ -48,19 +48,20 @@ python -m pip install -e .
 
 ## 输入文件
 
-默认输入文件为仓库根目录下的 INPUT.json。当前输入项包括：
+默认输入文件为仓库根目录下的 INPUT.json。当前最小输入项包括：
 
 - 赝势目录路径
-- 晶格常数与晶格基矢
+- 晶格常数与归一化晶格基矢
 - 原子分数坐标
-- SCF 最大步数与收敛阈值
-- 波函数求解阈值
-- 密度混合方法与参数
+- SCF 最大步数与统一收敛阈值
+- 线性混合系数
 - 实空间网格划分
-- 交换关联泛函类型
+- 交换关联类型
 - 轨道数 nbands
+- 显式 k 点列表和权重
+- 费米展宽与自旋简并度
 
-示例输入可直接参考仓库中的 INPUT.json。
+仓库中提供了 [INPUT.json](INPUT.json) 和 [Ref.json](Ref.json) 作为模板。
 
 ## 运行
 
@@ -82,82 +83,44 @@ python -m realspace_dft INPUT.json --log-dir logs --output-dir outputs
 1. 读取 INPUT.json
 2. 载入所需 UPF 赝势
 3. 构造实空间网格与初始密度
-4. 计算离子-离子 Ewald 常数项
-5. 构造 Kohn-Sham 哈密顿量
-6. 迭代求解波函数与电荷密度，直到满足 SCF 收敛判据
-7. 写出日志、最终电荷密度和 SCF 摘要
+4. 对每个 k 点构造包含 Bloch 边界的局域与非局域 Kohn-Sham 哈密顿量
+5. 对全部 k 点迭代求解波函数、费米能和电荷密度，直到满足 SCF 收敛判据
+6. 写出 TensorBoard 日志和最终电荷密度 txt
+7. 在终端打印初始化摘要和 SCF 摘要
 
 ## 输出内容
 
-### 终端摘要
-
-程序会打印：
+当前程序会在终端输出摘要，同时生成 TensorBoard 日志和最终电荷密度 txt。终端会打印：
 
 - 输入与赝势信息
-- 总价电子数
-- 非局域 projector 数
-- 离子-离子 Ewald 能
+- 总价电子数与最小占据轨道数
+- 网格规模和初始电荷积分
 - SCF 是否收敛
-- 最终电子总能
-- 最终晶体总能
+- k 点数与费米能
+- 最终密度残差
+- 最终最大能级变化
+- 最终总能
+- 最终电荷积分
 
-### TensorBoard 日志
-
-每次运行前默认会清空 logs 目录，然后写入新的 event 文件。可视化命令：
+TensorBoard 用法：
 
 ```bash
 tensorboard --logdir logs
 ```
 
-当前会记录的主要标量包括：
+默认输出文件：
 
-- density residual
-- mixed density change
-- wavefunction residual
-- electronic total energy
-- crystal total energy
-- kinetic / ionic local / nonlocal / Hartree / XC / Ewald 分项
-
-### 输出文件
-
-默认写入 outputs 目录：
-
-- final_density.npz
-	- 最终电荷密度
-	- 网格形状
-	- 电子数积分
-	- 最终电子总能
-	- 最终晶体总能
-	- 离子-离子 Ewald 常数项
-- scf_summary.json
-	- 收敛状态
-	- 迭代步数
-	- 最终能量与能量分项
-	- 最终电荷积分
-
-## 总能约定
-
-当前总能输出分为两层：
-
-- 电子总能：动能、电子-离子局域项、非局域项、Hartree 项和 XC 项之和
-- 晶体总能：电子总能再加上离子-离子 Ewald 常数项
-
-其中 Ewald 项采用周期性点电荷求和，并包含与 `G=0` 库仑分量去除一致的均匀中性背景修正。这一点会影响该常数项本身的数值符号，但不影响当前代码内部总能定义的一致性。
+- outputs/final_density.txt
+	- 列顺序为 ix, iy, iz, x_bohr, y_bohr, z_bohr, density_bohr^-3
 
 ## 测试
 
-仓库当前提供了初始化、哈密顿量、本征求解器、Ewald 总能和 SCF 工作流的回归测试。运行方式：
+仓库当前提供了初始化、哈密顿量、本征求解器和最小 SCF 工作流的回归测试。运行方式：
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-## 建议的下一步
+## 备注
 
-如果要继续把它推进成更完整的 DFT 软件，优先顺序建议是：
-
-1. 加入费米能搜索与分数占据
-2. 加入 k 点采样
-3. 加入原子力与结构优化
-4. 加入自旋极化
-5. 对 PBE 势和非局域 projector 做更系统的数值验证
+仓库自带的 SG15 赝势目录为 PBE 版本，因此示例输入默认使用 PBE。代码仍然保留 LDA/PBE 两种交换关联选项，但 SCF 算法本身已经收缩为最小版本。

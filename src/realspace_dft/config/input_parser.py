@@ -10,15 +10,22 @@ from typing import Any, Mapping
 
 import numpy as np
 
-from .constants import ALLOWED_MIXING_METHODS, ALLOWED_XC_FUNCTIONALS, ANGSTROM_TO_BOHR
+from .constants import (
+    ALLOWED_MIXING_METHODS,
+    ALLOWED_OCCUPATION_METHODS,
+    ALLOWED_XC_FUNCTIONALS,
+    ANGSTROM_TO_BOHR,
+)
 from .exceptions import DFTInputError
 from ..core.models import (
     AtomSite,
     CrystalStructure,
     GridSpec,
     InputConfig,
+    KPoint,
     MixingConfig,
     NumericalSettings,
+    OccupationSettings,
     SCFSettings,
 )
 
@@ -165,12 +172,8 @@ def _parse_atom_sites(raw_sites: Any) -> tuple[AtomSite, ...]:
 def _parse_mixing_config(root: Mapping[str, Any]) -> MixingConfig:
     """解析密度混合配置，并根据所选方法检查参数。"""
 
-    method_raw = str(_read_required(root, "SCF控制", "密度混合", "方法")).strip()
-    if method_raw.lower() == "linear":
-        method = "linear"
-    elif method_raw.upper() == "DIIS":
-        method = "DIIS"
-    else:
+    method_raw = str(_read_optional(root, "SCF控制", "密度混合", "方法", default="linear")).strip()
+    if method_raw.lower() != "linear":
         allowed_methods = ", ".join(sorted(ALLOWED_MIXING_METHODS))
         raise DFTInputError(f"密度混合方法仅支持: {allowed_methods}")
 
@@ -181,16 +184,9 @@ def _parse_mixing_config(root: Mapping[str, Any]) -> MixingConfig:
     if linear_coefficient > 1.0:
         raise DFTInputError("线性混合系数必须在 (0, 1] 区间内。")
 
-    diis_history_steps = _parse_positive_int(
-        _read_optional(root, "SCF控制", "密度混合", "DIIS历史步数", default=6),
-        "SCF控制/密度混合/DIIS历史步数",
-        minimum=2,
-    )
-
     return MixingConfig(
-        method=method,
+        method="linear",
         linear_coefficient=linear_coefficient,
-        diis_history_steps=diis_history_steps,
     )
 
 
@@ -215,6 +211,76 @@ def _parse_grid_spec(root: Mapping[str, Any]) -> GridSpec:
         ),
     )
     return GridSpec(shape=shape)
+
+
+def _parse_kpoints(root: Mapping[str, Any]) -> tuple[KPoint, ...]:
+    """解析显式给出的 k 点列表。"""
+
+    raw_kpoints = _read_optional(root, "数值设置", "k点", default=None)
+    if raw_kpoints is None:
+        return (KPoint(fractional_coordinates=(0.0, 0.0, 0.0), weight=1.0),)
+    if not isinstance(raw_kpoints, list) or not raw_kpoints:
+        raise DFTInputError("数值设置/k点 必须是非空列表。")
+
+    parsed_kpoints: list[KPoint] = []
+    total_weight = 0.0
+    for index, raw_kpoint in enumerate(raw_kpoints, start=1):
+        if not isinstance(raw_kpoint, Mapping):
+            raise DFTInputError(f"数值设置/k点 中的第 {index} 项必须是对象。")
+
+        coordinates = _read_required(raw_kpoint, "坐标")
+        if not isinstance(coordinates, (list, tuple)) or len(coordinates) != 3:
+            raise DFTInputError(f"数值设置/k点 中的第 {index} 项坐标必须是 3 个分量。")
+        try:
+            fractional_coordinates = tuple(float(value) for value in coordinates)
+        except (TypeError, ValueError) as exc:
+            raise DFTInputError(f"数值设置/k点 中的第 {index} 项坐标必须是数值。") from exc
+        if not all(math.isfinite(value) for value in fractional_coordinates):
+            raise DFTInputError(f"数值设置/k点 中的第 {index} 项坐标包含非法数值。")
+
+        weight = _parse_positive_float(
+            _read_optional(raw_kpoint, "权重", default=1.0),
+            f"数值设置/k点/{index}/权重",
+        )
+        total_weight += weight
+        parsed_kpoints.append(KPoint(fractional_coordinates=fractional_coordinates, weight=weight))
+
+    if total_weight <= 0.0:
+        raise DFTInputError("k 点总权重必须大于 0。")
+
+    return tuple(
+        KPoint(
+            fractional_coordinates=kpoint.fractional_coordinates,
+            weight=kpoint.weight / total_weight,
+        )
+        for kpoint in parsed_kpoints
+    )
+
+
+def _parse_occupation_settings(root: Mapping[str, Any]) -> OccupationSettings:
+    """解析费米分数占据设置。"""
+
+    method = str(
+        _read_optional(root, "数值设置", "占据设置", "方法", default="FERMI_DIRAC")
+    ).strip().upper()
+    if method not in ALLOWED_OCCUPATION_METHODS:
+        allowed_methods = ", ".join(sorted(ALLOWED_OCCUPATION_METHODS))
+        raise DFTInputError(f"占据方法仅支持: {allowed_methods}")
+
+    smearing_width_hartree = _parse_positive_float(
+        _read_optional(root, "数值设置", "占据设置", "展宽哈特里", default=0.01),
+        "数值设置/占据设置/展宽哈特里",
+    )
+    spin_degeneracy = _parse_positive_float(
+        _read_optional(root, "数值设置", "占据设置", "自旋简并度", default=2.0),
+        "数值设置/占据设置/自旋简并度",
+    )
+
+    return OccupationSettings(
+        method=method,
+        smearing_width_hartree=smearing_width_hartree,
+        spin_degeneracy=spin_degeneracy,
+    )
 
 
 def _validate_crystal(crystal: CrystalStructure) -> None:
@@ -277,10 +343,6 @@ def 加载输入参数(input_path: str | Path = "INPUT.json") -> InputConfig:
             _read_required(root, "SCF控制", "SCF收敛阈值"),
             "SCF控制/SCF收敛阈值",
         ),
-        wavefunction_tolerance=_parse_positive_float(
-            _read_required(root, "SCF控制", "波函数收敛阈值"),
-            "SCF控制/波函数收敛阈值",
-        ),
         mixing=_parse_mixing_config(root),
     )
 
@@ -296,6 +358,8 @@ def 加载输入参数(input_path: str | Path = "INPUT.json") -> InputConfig:
             _read_required(root, "数值设置", "轨道数"),
             "数值设置/轨道数",
         ),
+        kpoints=_parse_kpoints(root),
+        occupations=_parse_occupation_settings(root),
     )
 
     return InputConfig(

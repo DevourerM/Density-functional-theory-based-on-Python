@@ -1,4 +1,4 @@
-"""命令行入口：执行完整实空间 DFT 计算流程。"""
+"""命令行入口：执行最小实空间 DFT SCF 计算。"""
 
 from __future__ import annotations
 
@@ -46,8 +46,7 @@ def main() -> None:
     print(pipeline_result.scf_result.summary())
     print()
     print(f"TensorBoard 日志目录: {pipeline_result.log_dir}")
-    print(f"最终电荷密度文件: {pipeline_result.density_file_path}")
-    print(f"SCF 摘要文件: {pipeline_result.summary_file_path}")
+    print(f"最终电荷密度 txt: {pipeline_result.density_txt_path}")
 
 
 if __name__ == "__main__":

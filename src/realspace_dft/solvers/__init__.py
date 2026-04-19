@@ -2,7 +2,6 @@
 
 from .eigen import (
     BaseBandEigenSolver,
-    DavidsonBandEigenSolver,
     IterativeEigenSolverConfig,
     IterativeEigenSolverResult,
     LOBPCGBandEigenSolver,
@@ -11,12 +10,10 @@ from .eigen import (
     求解本征波函数,
     本征求解结果,
     本征求解配置,
-    Davidson波函数求解器,
     LOBPCG波函数求解器,
 )
 from .mixing import (
     BaseDensityMixer,
-    DIISDensityMixer,
     LinearDensityMixer,
     create_density_mixer,
     创建密度混合器,
@@ -25,8 +22,6 @@ from .mixing import (
 __all__ = [
     "BaseBandEigenSolver",
     "BaseDensityMixer",
-    "DavidsonBandEigenSolver",
-    "DIISDensityMixer",
     "IterativeEigenSolverConfig",
     "IterativeEigenSolverResult",
     "LOBPCGBandEigenSolver",
@@ -38,7 +33,6 @@ __all__ = [
     "求解本征波函数",
     "本征求解结果",
     "本征求解配置",
-    "Davidson波函数求解器",
     "LOBPCG波函数求解器",
 ]
 

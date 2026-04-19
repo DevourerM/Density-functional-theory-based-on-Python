@@ -1,14 +1,14 @@
-"""完整计算流程编排。"""
+"""最小完整计算流程编排。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..reporting.persistence import 保存SCF摘要, 保存最终电荷密度
+from ..core.models import RuntimeContext
+from ..reporting.persistence import 保存最终电荷密度TXT
 from ..reporting.tensorboard import 写入SCF过程到TensorBoard, 清空日志目录
 from .bootstrap import 初始化计算上下文
-from ..core.models import RuntimeContext
 from .scf import SCFResult, 运行SCF循环
 
 
@@ -19,15 +19,14 @@ class PipelineResult:
     context: RuntimeContext
     scf_result: SCFResult
     log_dir: Path
-    density_file_path: Path
-    summary_file_path: Path
-
+    density_txt_path: Path
 
 def _解析输出路径(base_dir: Path, path_like: str | Path) -> Path:
     candidate = Path(path_like)
     if candidate.is_absolute():
         return candidate.resolve()
     return (base_dir / candidate).resolve()
+
 
 
 def 执行完整计算流程(
@@ -37,7 +36,7 @@ def 执行完整计算流程(
     output_dir: str | Path = "outputs",
     clear_logs: bool = True,
 ) -> PipelineResult:
-    """执行初始化、SCF、TensorBoard 和结果保存。"""
+    """执行初始化、SCF、TensorBoard 写出和最终密度导出。"""
 
     resolved_input_path = Path(input_path).resolve()
     base_dir = resolved_input_path.parent
@@ -52,13 +51,10 @@ def 执行完整计算流程(
     context = 初始化计算上下文(resolved_input_path)
     scf_result = 运行SCF循环(initial_context=context)
     写入SCF过程到TensorBoard(resolved_log_dir, scf_result)
-    density_file_path = 保存最终电荷密度(resolved_output_dir, scf_result)
-    summary_file_path = 保存SCF摘要(resolved_output_dir, scf_result)
-
+    density_txt_path = 保存最终电荷密度TXT(resolved_output_dir, scf_result)
     return PipelineResult(
         context=context,
         scf_result=scf_result,
         log_dir=resolved_log_dir,
-        density_file_path=density_file_path,
-        summary_file_path=summary_file_path,
+        density_txt_path=density_txt_path,
     )

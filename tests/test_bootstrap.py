@@ -24,15 +24,20 @@ class BootstrapInitializationTest(unittest.TestCase):
         self.assertEqual(context.real_space_grid.shape, (64, 64, 64))
         self.assertAlmostEqual(context.total_valence_electrons, 8.0)
         self.assertAlmostEqual(context.density_grid.integrated_electrons, 8.0)
+        self.assertEqual(context.config.kpoint_count, 1)
+        self.assertAlmostEqual(context.config.numerical.kpoints[0].weight, 1.0)
         self.assertEqual(context.hamiltonian.shape, (64 * 64 * 64, 64 * 64 * 64))
-        self.assertTrue(np.isfinite(context.ion_ion_ewald_hartree))
-        self.assertNotEqual(context.ion_ion_ewald_hartree, 0.0)
         self.assertEqual(
             context.hamiltonian_components.effective_local_potential.values.shape,
             (64, 64, 64),
         )
+        self.assertEqual(context.hamiltonian_components.kinetic.stencil_point_count, 7)
         self.assertTrue(context.pseudopotentials["Si"].has_nonlocal_projectors)
         self.assertIsNotNone(context.hamiltonian_components.nonlocal_pseudopotential)
+        self.assertGreater(
+            context.hamiltonian_components.nonlocal_pseudopotential.projector_count,
+            0,
+        )
 
 
 if __name__ == "__main__":
