@@ -27,6 +27,7 @@ class WaveFunction:
         self.nbands = max(filled_bands, requested_bands, 1)
         self.eigensolver_tolerance = float(config.get("eigensolver_tolerance", 1.0e-7))
         self.eigensolver_maxiter = int(config.get("eigensolver_maxiter", 1200))
+        self.smearing_sigma = float(config.get("smearing_sigma", 0.0))
         self._kinetic_operator_cache: dict[tuple[Any, ...], sparse.csr_matrix] = {}
 
     def _build_1d_laplacian(
@@ -76,16 +77,54 @@ class WaveFunction:
         self._kinetic_operator_cache[cache_key] = kinetic_operator
         return kinetic_operator
 
-    def _compute_occupations(self, state_count: int) -> list[float]:
+    def _compute_occupations(self, state_count: int, eigenvalues: list[float] | None = None) -> list[float]:
         occupations: list[float] = []
-        remaining_electrons = max(self.total_electrons, 0.0)
-        for _ in range(state_count):
-            if remaining_electrons <= 0.0:
+        target_electrons = max(self.total_electrons, 0.0)
+
+        if self.smearing_sigma <= 1.0e-12 or eigenvalues is None:
+            remaining_electrons = target_electrons
+            for _ in range(state_count):
+                if remaining_electrons <= 0.0:
+                    occupations.append(0.0)
+                    continue
+                occupation = min(2.0, remaining_electrons)
+                occupations.append(occupation)
+                remaining_electrons -= occupation
+            return occupations
+
+        def electron_sum(mu: float) -> float:
+            total = 0.0
+            for e in eigenvalues:
+                x = (e - mu) / self.smearing_sigma
+                if x < -100.0:
+                    total += 2.0
+                elif x <= 100.0:
+                    total += 2.0 / (1.0 + math.exp(x))
+            return total
+
+        min_e = min(eigenvalues) - 0.1 - self.smearing_sigma * 10
+        max_e = max(eigenvalues) + 0.1 + self.smearing_sigma * 10
+
+        import scipy.optimize
+        try:
+            res = scipy.optimize.root_scalar(
+                lambda mu: electron_sum(mu) - target_electrons,
+                bracket=[min_e, max_e],
+                method="brentq",
+            )
+            fermi_level = float(res.root)
+        except Exception:
+            fermi_level = eigenvalues[int(target_electrons / 2.0)] if target_electrons > 0 else min_e
+
+        for e in eigenvalues:
+            x = (e - fermi_level) / self.smearing_sigma
+            if x < -100.0:
+                occupations.append(2.0)
+            elif x > 100.0:
                 occupations.append(0.0)
-                continue
-            occupation = min(2.0, remaining_electrons)
-            occupations.append(occupation)
-            remaining_electrons -= occupation
+            else:
+                occupations.append(2.0 / (1.0 + math.exp(x)))
+
         return occupations
 
     def assign_kpoint_occupations(
@@ -102,14 +141,53 @@ class WaveFunction:
             for band_index, energy in enumerate(solver_result["eigenvalues"]):
                 state_energies.append((float(energy), k_index, band_index, float(weight)))
 
-        remaining_electrons = max(self.total_electrons, 0.0)
-        for _, k_index, band_index, weight in sorted(state_energies, key=lambda item: item[0]):
-            if remaining_electrons <= 0.0:
-                break
-            state_capacity = 2.0 * weight
-            occupied_electrons = min(state_capacity, remaining_electrons)
-            occupations[k_index][band_index] = occupied_electrons / max(weight, 1.0e-14)
-            remaining_electrons -= occupied_electrons
+        target_electrons = max(self.total_electrons, 0.0)
+
+        if self.smearing_sigma <= 1.0e-12:
+            remaining_electrons = target_electrons
+            for _, k_index, band_index, weight in sorted(state_energies, key=lambda item: item[0]):
+                if remaining_electrons <= 0.0:
+                    break
+                state_capacity = 2.0 * weight
+                occupied_electrons = min(state_capacity, remaining_electrons)
+                occupations[k_index][band_index] = occupied_electrons / max(weight, 1.0e-14)
+                remaining_electrons -= occupied_electrons
+            return occupations
+
+        def electron_sum(mu: float) -> float:
+            total = 0.0
+            for e, _, _, w in state_energies:
+                x = (e - mu) / self.smearing_sigma
+                if x < -100.0:
+                    total += 2.0 * w
+                elif x <= 100.0:
+                    total += 2.0 * w / (1.0 + math.exp(x))
+            return total
+
+        min_e = min(e for e, _, _, _ in state_energies) - 0.1 - self.smearing_sigma * 10
+        max_e = max(e for e, _, _, _ in state_energies) + 0.1 + self.smearing_sigma * 10
+
+        import scipy.optimize
+        try:
+            res = scipy.optimize.root_scalar(
+                lambda mu: electron_sum(mu) - target_electrons,
+                bracket=[min_e, max_e],
+                method="brentq",
+            )
+            fermi_level = float(res.root)
+        except Exception:
+            fermi_level = min_e
+
+        for e, k_index, band_index, w in state_energies:
+            x = (e - fermi_level) / self.smearing_sigma
+            if x < -100.0:
+                occ = 2.0
+            elif x > 100.0:
+                occ = 0.0
+            else:
+                occ = 2.0 / (1.0 + math.exp(x))
+            occupations[k_index][band_index] = occ
+
         return occupations
 
     def attach_occupations(
@@ -182,7 +260,7 @@ class WaveFunction:
         sort_indices = np.argsort(eigenvalues.real)
         eigenvalues = np.array(eigenvalues[sort_indices], dtype=float)
         eigenvectors = np.array(eigenvectors[:, sort_indices], dtype=complex)
-        occupations = self._compute_occupations(len(eigenvalues))
+        occupations = self._compute_occupations(len(eigenvalues), eigenvalues.tolist())
 
         states = []
         for band_index, energy in enumerate(eigenvalues.tolist()):

@@ -1,19 +1,19 @@
 {
-    "project_name": "diamond_c_sg15",
+    "project_name": "graphene_c_sg15",
 
-    "lattice_constant": 3.567,
+    "lattice_constant": 2.46,
     "lattice_directions": [
-        [0.0, 0.5, 0.5],
-        [0.5, 0.0, 0.5],
-        [0.5, 0.5, 0.0]
+        [1.0, 0.0, 0.0],
+        [-0.5, 0.86602540378, 0.0],
+        [0.0, 0.0, 6.0]
     ],
 
     "pos": [
-        ["C", 0.00, 0.00, 0.00],
-        ["C", 0.25, 0.25, 0.25]
+        ["C", 0.33333333, 0.66666667, 0.5],
+        ["C", 0.66666667, 0.33333333, 0.5]
     ],
 
-    "k_grid": [2, 2, 2],
+    "k_grid": [4, 4, 1],
 
     "xc_functional": "PBE",
     "pseudopotential_dir": "SG15-Version1p0_Pseudopotential/SG15_ONCV_v1.0_upf",
@@ -22,25 +22,30 @@
     "xc_scale": 1.0,
     "mixing_beta": 0.06,
     "momentum_beta": 0.10,
-    "density_grid": [12, 12, 12],
-    "nbands": 6,
+    "density_grid": [12, 12, 36],
+    "nbands": 8,
     "eigensolver_tolerance": 1.0e-6,
-    "initial_density_noise_grid": [12, 12, 12],
+    "initial_density_noise_grid": [12, 12, 36],
     "initial_density_seed": 20260426,
-    "save_result_json": true,
-    "save_density_npy": true,
-    "save_density_plot": true,
-    "show_plot": false,
-    "show_density_evolution": false,
-    "visualization_repeat_count": 1,
-    "visualization_repeat_max": 3,
+    "smearing_sigma": 0.05,
+    "save_result_json": false,
+    "save_density_npy": false,
+    "save_density_plot": false,
+    "show_plot": true,
+    "show_density_evolution": true,
+    "visualization_repeat_x": 1,
+    "visualization_repeat_y": 1,
+    "visualization_repeat_z": 1,
+    "visualization_repeat_max_x": 3,
+    "visualization_repeat_max_y": 3,
+    "visualization_repeat_max_z": 3,
     "show_progress": true,
     "compute_forces": false,
     "compute_stress": false,
     "force_displacement": 1.0e-3,
     "stress_strain_step": 2.5e-3,
     "property_scf_max_iterations": 8,
-    "property_scf_tolerance": 1.0e-5,
-    "scf_max_iterations": 1000,
+    "property_scf_tolerance": 1.0e-2,
+    "scf_max_iterations": 200,
     "scf_tolerance": 1.0e-5
 }

@@ -527,7 +527,15 @@ def select_density_points(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     flat_density = density_grid.reshape(-1)
     flat_points = cartesian_grid.reshape(-1, 3)
-    threshold = float(np.quantile(flat_density, density_quantile)) if flat_density.size else 0.0
+    
+    if flat_density.size == 0:
+        return np.zeros((0, 3)), np.zeros(0), np.zeros(0)
+        
+    density_max = float(np.max(flat_density))
+    relative_threshold = density_max * 0.03
+    quantile_threshold = float(np.quantile(flat_density, density_quantile))
+    threshold = max(relative_threshold, quantile_threshold)
+    
     mask = flat_density >= threshold
     selected_points = flat_points[mask]
     selected_density = flat_density[mask]
@@ -588,13 +596,17 @@ def prepare_density_frames(
 
 def build_repeat_translations(
     lattice_vectors: np.ndarray,
-    repeat_count: int,
+    repeat_x: int,
+    repeat_y: int,
+    repeat_z: int,
 ) -> list[np.ndarray]:
-    sanitized_repeat_count = max(int(repeat_count), 1)
+    sanitized_rx = max(int(repeat_x), 1)
+    sanitized_ry = max(int(repeat_y), 1)
+    sanitized_rz = max(int(repeat_z), 1)
     translations: list[np.ndarray] = []
-    for i in range(sanitized_repeat_count):
-        for j in range(sanitized_repeat_count):
-            for k in range(sanitized_repeat_count):
+    for i in range(sanitized_rx):
+        for j in range(sanitized_ry):
+            for k in range(sanitized_rz):
                 translations.append(i * lattice_vectors[0] + j * lattice_vectors[1] + k * lattice_vectors[2])
     return translations
 
@@ -619,14 +631,16 @@ def render_density_frame(
     cell_corners: np.ndarray,
     edges: Sequence[tuple[int, int]],
     cartesian_positions: np.ndarray,
-    repeat_count: int,
+    repeat_x: int,
+    repeat_y: int,
+    repeat_z: int,
 ) -> None:
     axis.cla()
 
     selected_points = prepared_frame["selected_points"]
     selected_density = prepared_frame["selected_density"]
     point_sizes = prepared_frame["point_sizes"]
-    translations = build_repeat_translations(lattice_vectors, repeat_count)
+    translations = build_repeat_translations(lattice_vectors, repeat_x, repeat_y, repeat_z)
     repeated_points = repeat_periodic_points(selected_points, translations)
     repeated_density = repeat_periodic_scalars(selected_density, len(translations))
     repeated_point_sizes = repeat_periodic_scalars(point_sizes, len(translations))
@@ -681,7 +695,9 @@ def render_iteration_info(
     prepared_frame: Dict[str, Any],
     electron_count: float | None,
     k_grid: Sequence[int] | None,
-    repeat_count: int,
+    repeat_x: int,
+    repeat_y: int,
+    repeat_z: int,
 ) -> None:
     info_axis.cla()
     info_axis.axis("off")
@@ -700,7 +716,7 @@ def render_iteration_info(
         lines.append(f"Electron count: {electron_count:.3f}")
     if k_grid is not None:
         lines.append("K grid: " + " x ".join(str(int(component)) for component in k_grid))
-    lines.append("Repeat cells: " + " x ".join([str(int(repeat_count))] * 3))
+    lines.append(f"Repeat cells: {int(repeat_x)}x{int(repeat_y)}x{int(repeat_z)}")
     if residual is None:
         lines.append("Residual: initial guess")
     else:
@@ -741,7 +757,9 @@ def render_iteration_progress(
     frame_index: int,
     frame_count: int,
     prepared_frame: Dict[str, Any],
-    repeat_count: int,
+    repeat_x: int,
+    repeat_y: int,
+    repeat_z: int,
 ) -> None:
     progress_axis.cla()
     progress_axis.axis("off")
@@ -754,20 +772,18 @@ def render_iteration_progress(
 
     progress_axis.text(
         0.0,
-        0.88,
+        0.9,
         "SCF Evolution",
-        transform=progress_axis.transAxes,
         ha="left",
         va="top",
-        fontsize=10,
+        fontsize=11,
         fontweight="bold",
         color="#16324f",
     )
     progress_axis.text(
         1.0,
-        0.88,
+        0.9,
         label,
-        transform=progress_axis.transAxes,
         ha="right",
         va="top",
         fontsize=10,
@@ -775,12 +791,11 @@ def render_iteration_progress(
     )
     progress_axis.text(
         0.0,
-        0.16,
+        0.1,
         (
             f"Drag the sliders below to inspect SCF frames and periodic repeats. "
-            f"Frame: {frame_index + 1}/{frame_count}, repeat: {repeat_count}x{repeat_count}x{repeat_count}"
+            f"Frame: {frame_index + 1}/{frame_count}, repeat: {repeat_x}x{repeat_y}x{repeat_z}"
         ),
-        transform=progress_axis.transAxes,
         ha="left",
         va="bottom",
         fontsize=9,
@@ -810,8 +825,9 @@ def initialize_frame_slider(
     return frame_slider
 
 
-def initialize_repeat_slider(
+def initialize_axis_repeat_slider(
     slider_axis: Any,
+    slider_label: str,
     repeat_max: int,
     initial_repeat_count: int,
 ) -> Any:
@@ -820,7 +836,7 @@ def initialize_repeat_slider(
     slider_axis.set_facecolor("#eef2f7")
     repeat_slider = Slider(
         ax=slider_axis,
-        label="Repeat",
+        label=slider_label,
         valmin=1,
         valmax=max(int(repeat_max), 1),
         valinit=max(int(initial_repeat_count), 1),
@@ -829,7 +845,7 @@ def initialize_repeat_slider(
         initcolor="none",
     )
     current_repeat = max(int(initial_repeat_count), 1)
-    repeat_slider.valtext.set_text(f"{current_repeat}x{current_repeat}x{current_repeat}")
+    repeat_slider.valtext.set_text(f"{current_repeat}")
     return repeat_slider
 
 
@@ -867,8 +883,12 @@ def write_visualization(
     show_density_evolution: bool = True,
     density_quantile: float = 0.82,
     save_figure: bool = True,
-    repeat_count: int = 1,
-    repeat_max: int = 1,
+    repeat_x: int = 1,
+    repeat_y: int = 1,
+    repeat_z: int = 1,
+    repeat_max_x: int = 1,
+    repeat_max_y: int = 1,
+    repeat_max_z: int = 1,
 ) -> None:
     import matplotlib
 
@@ -899,24 +919,27 @@ def write_visualization(
     ]
     prepared_frames, color_max = prepare_density_frames(frames_to_show, cartesian_grid, density_quantile)
 
-    initial_repeat_count = max(int(repeat_count), 1)
-    repeat_slider_max = max(int(repeat_max), initial_repeat_count, 1)
+    initial_rx = max(int(repeat_x), 1)
+    initial_ry = max(int(repeat_y), 1)
+    initial_rz = max(int(repeat_z), 1)
+    rmax_x = max(int(repeat_max_x), initial_rx, 1)
+    rmax_y = max(int(repeat_max_y), initial_ry, 1)
+    rmax_z = max(int(repeat_max_z), initial_rz, 1)
 
-    figure = plt.figure(figsize=(12.5, 9.4), dpi=180)
-    grid_spec = figure.add_gridspec(
-        2,
-        2,
-        height_ratios=[14, 3.0],
-        width_ratios=[15, 5],
-        hspace=0.16,
-        wspace=0.12,
-    )
-    bottom_spec = grid_spec[1, :].subgridspec(3, 1, height_ratios=[0.7, 1.0, 1.0], hspace=0.08)
+    figure = plt.figure(figsize=(14.0, 10.0), dpi=180)
+    figure.subplots_adjust(left=0.05, right=0.96, top=0.94, bottom=0.25)
+    
+    grid_spec = figure.add_gridspec(1, 2, width_ratios=[3, 1], right=0.96, bottom=0.28, wspace=0.1)
     axis = figure.add_subplot(grid_spec[0, 0], projection="3d")
     info_axis = figure.add_subplot(grid_spec[0, 1])
-    progress_axis = figure.add_subplot(bottom_spec[0, 0])
-    frame_slider_axis = figure.add_subplot(bottom_spec[1, 0])
-    repeat_slider_axis = figure.add_subplot(bottom_spec[2, 0])
+
+    progress_axis = figure.add_axes([0.05, 0.20, 0.90, 0.05])
+    slider_left = 0.15
+    slider_width = 0.75
+    frame_slider_axis = figure.add_axes([slider_left, 0.15, slider_width, 0.025])
+    slider_rx_axis = figure.add_axes([slider_left, 0.11, slider_width, 0.025])
+    slider_ry_axis = figure.add_axes([slider_left, 0.07, slider_width, 0.025])
+    slider_rz_axis = figure.add_axes([slider_left, 0.03, slider_width, 0.025])
 
     cell_corners = np.array(
         [
@@ -950,37 +973,45 @@ def write_visualization(
     figure.colorbar(color_mapper, ax=axis, fraction=0.032, pad=0.03, shrink=0.82, label="density")
 
     current_frame_index = len(prepared_frames) - 1
-    current_repeat_count = initial_repeat_count
+    current_rx = initial_rx
+    current_ry = initial_ry
+    current_rz = initial_rz
 
-    def update_frame(frame_index: int, repeat_value: int) -> None:
+    def update_frame() -> None:
         render_density_frame(
             axis,
-            prepared_frames[frame_index],
+            prepared_frames[current_frame_index],
             color_max,
             lattice_vectors,
             cell_corners,
             edges,
             cartesian_positions,
-            repeat_value,
+            current_rx,
+            current_ry,
+            current_rz,
         )
         render_iteration_info(
             info_axis,
-            frame_index,
+            current_frame_index,
             len(prepared_frames),
-            prepared_frames[frame_index],
+            prepared_frames[current_frame_index],
             electron_count,
             k_grid,
-            repeat_value,
+            current_rx,
+            current_ry,
+            current_rz,
         )
         render_iteration_progress(
             progress_axis,
-            frame_index,
+            current_frame_index,
             len(prepared_frames),
-            prepared_frames[frame_index],
-            repeat_value,
+            prepared_frames[current_frame_index],
+            current_rx,
+            current_ry,
+            current_rz,
         )
 
-    update_frame(current_frame_index, current_repeat_count)
+    update_frame()
 
     if show_density_evolution and len(prepared_frames) > 1:
         frame_slider = initialize_frame_slider(frame_slider_axis, len(prepared_frames), current_frame_index)
@@ -989,7 +1020,7 @@ def write_visualization(
             nonlocal current_frame_index
             frame_index = max(0, min(len(prepared_frames) - 1, int(round(value)) - 1))
             current_frame_index = frame_index
-            update_frame(current_frame_index, current_repeat_count)
+            update_frame()
             frame_slider.valtext.set_text(f"{frame_index + 1}/{len(prepared_frames)}")
             figure.canvas.draw_idle()
 
@@ -1007,33 +1038,42 @@ def write_visualization(
             color="#46607a",
         )
 
-    if repeat_slider_max > 1:
-        repeat_slider = initialize_repeat_slider(repeat_slider_axis, repeat_slider_max, current_repeat_count)
+    slider_rx = initialize_axis_repeat_slider(slider_rx_axis, "Repeat X", rmax_x, current_rx)
+    slider_ry = initialize_axis_repeat_slider(slider_ry_axis, "Repeat Y", rmax_y, current_ry)
+    slider_rz = initialize_axis_repeat_slider(slider_rz_axis, "Repeat Z", rmax_z, current_rz)
 
-        def on_repeat_slider_change(value: float) -> None:
-            nonlocal current_repeat_count
-            current_repeat_count = max(1, int(round(value)))
-            update_frame(current_frame_index, current_repeat_count)
-            repeat_slider.valtext.set_text(
-                f"{current_repeat_count}x{current_repeat_count}x{current_repeat_count}"
-            )
-            figure.canvas.draw_idle()
+    def on_rx_change(value: float) -> None:
+        nonlocal current_rx
+        current_rx = max(1, int(round(value)))
+        update_frame()
+        slider_rx.valtext.set_text(f"{current_rx}")
+        figure.canvas.draw_idle()
 
-        repeat_slider.on_changed(on_repeat_slider_change)
-    else:
-        repeat_slider_axis.axis("off")
-        repeat_slider_axis.text(
-            0.0,
-            0.5,
-            "Repeat slider disabled (repeat_max <= 1)",
-            transform=repeat_slider_axis.transAxes,
-            ha="left",
-            va="center",
-            fontsize=9,
-            color="#46607a",
-        )
+    def on_ry_change(value: float) -> None:
+        nonlocal current_ry
+        current_ry = max(1, int(round(value)))
+        update_frame()
+        slider_ry.valtext.set_text(f"{current_ry}")
+        figure.canvas.draw_idle()
 
-    figure.subplots_adjust(left=0.05, right=0.96, top=0.94, bottom=0.08)
+    def on_rz_change(value: float) -> None:
+        nonlocal current_rz
+        current_rz = max(1, int(round(value)))
+        update_frame()
+        slider_rz.valtext.set_text(f"{current_rz}")
+        figure.canvas.draw_idle()
+
+    slider_rx.on_changed(on_rx_change)
+    slider_ry.on_changed(on_ry_change)
+    slider_rz.on_changed(on_rz_change)
+
+    if rmax_x <= 1:
+        slider_rx_axis.set_visible(False)
+    if rmax_y <= 1:
+        slider_ry_axis.set_visible(False)
+    if rmax_z <= 1:
+        slider_rz_axis.set_visible(False)
+
     if save_figure:
         figure.savefig(output_path)
 
@@ -1127,8 +1167,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     save_density_npy = bool(config.get("save_density_npy", False))
     save_density_plot = bool(config.get("save_density_plot", True))
     density_quantile = float(config.get("density_visualization_quantile", 0.82))
-    visualization_repeat_count = int(config.get("visualization_repeat_count", 1))
-    visualization_repeat_max = int(config.get("visualization_repeat_max", visualization_repeat_count))
+    repeat_x = int(config.get("visualization_repeat_x", 1))
+    repeat_y = int(config.get("visualization_repeat_y", 1))
+    repeat_z = int(config.get("visualization_repeat_z", 1))
+    repeat_max_x = int(config.get("visualization_repeat_max_x", max(repeat_x, 3)))
+    repeat_max_y = int(config.get("visualization_repeat_max_y", max(repeat_y, 3)))
+    repeat_max_z = int(config.get("visualization_repeat_max_z", max(repeat_z, 3)))
 
     result = solve_scf(config)
     output_dir = input_path.parent
@@ -1148,8 +1192,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             show_density_evolution=show_density_evolution,
             density_quantile=density_quantile,
             save_figure=save_density_plot,
-            repeat_count=visualization_repeat_count,
-            repeat_max=visualization_repeat_max,
+            repeat_x=repeat_x,
+            repeat_y=repeat_y,
+            repeat_z=repeat_z,
+            repeat_max_x=repeat_max_x,
+            repeat_max_y=repeat_max_y,
+            repeat_max_z=repeat_max_z,
         )
 
     if save_density_npy:
@@ -1168,8 +1216,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         "frame_count": len(result["density_frames"]) if (save_density_plot or show_plot) else 0,
         "show_plot": show_plot,
         "show_density_evolution": show_density_evolution,
-        "repeat_count": visualization_repeat_count,
-        "repeat_max": visualization_repeat_max,
+        "repeat_x": repeat_x,
+        "repeat_y": repeat_y,
+        "repeat_z": repeat_z,
+        "repeat_max_x": repeat_max_x,
+        "repeat_max_y": repeat_max_y,
+        "repeat_max_z": repeat_max_z,
     }
     if save_result_json:
         with result_path.open("w", encoding="utf-8") as handle:
