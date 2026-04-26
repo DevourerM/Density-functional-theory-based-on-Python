@@ -1,9 +1,3 @@
-__pycache__/
-*.pyc
-.pytest_cache/
-.mypy_cache/
-.venv/
-build/
-dist/
+/__pycache__
 /.venv
-/SG15-Version1p0_Pseudopotential
+/SG15*
