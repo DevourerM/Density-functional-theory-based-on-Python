@@ -240,15 +240,56 @@ class WaveFunction:
                     dense_operator = dense_operator + volume_element * (
                         projector_matrix @ d_matrix @ projector_matrix.conjugate().T
                     )
-                eigenvalues, eigenvectors = np.linalg.eigh(dense_operator)
+                
+                try:
+                    import cupy as cp
+                    gpu_operator = cp.asarray(dense_operator)
+                    gpu_vals, gpu_vecs = cp.linalg.eigh(gpu_operator)
+                    eigenvalues = cp.asnumpy(gpu_vals)
+                    eigenvectors = cp.asnumpy(gpu_vecs)
+                except ImportError:
+                    eigenvalues, eigenvectors = np.linalg.eigh(dense_operator)
             else:
-                eigenvalues, eigenvectors = sparse_linalg.eigsh(
-                    total_operator,
-                    k=band_count,
-                    which="SA",
-                    tol=self.eigensolver_tolerance,
-                    maxiter=self.eigensolver_maxiter,
-                )
+                try:
+                    import cupy as cp
+                    from cupyx.scipy.sparse.linalg import eigsh as cp_eigsh
+                    from cupyx.scipy.sparse.linalg import LinearOperator as cp_LinearOperator
+                    
+                    gpu_kinetic = cp.sparse.csr_matrix(kinetic_operator)
+                    gpu_potential = cp.asarray(effective_potential)
+                    gpu_proj = cp.asarray(projector_matrix) if projector_matrix.shape[1] > 0 else None
+                    gpu_d = cp.asarray(d_matrix) if projector_matrix.shape[1] > 0 else None
+                    
+                    def gpu_matvec(vector: cp.ndarray) -> cp.ndarray:
+                        res = gpu_kinetic.dot(vector)
+                        res = res + gpu_potential * vector
+                        if gpu_proj is not None:
+                            overlaps = volume_element * (gpu_proj.conj().T.dot(vector))
+                            res = res + gpu_proj.dot(gpu_d.dot(overlaps))
+                        return res
+                        
+                    gpu_op = cp_LinearOperator(
+                        shape=(matrix_size, matrix_size),
+                        matvec=gpu_matvec,
+                        dtype=complex,
+                    )
+                    gpu_vals, gpu_vecs = cp_eigsh(
+                        gpu_op,
+                        k=band_count,
+                        which="SA",
+                        tol=self.eigensolver_tolerance,
+                        maxiter=self.eigensolver_maxiter,
+                    )
+                    eigenvalues = cp.asnumpy(gpu_vals)
+                    eigenvectors = cp.asnumpy(gpu_vecs)
+                except ImportError:
+                    eigenvalues, eigenvectors = sparse_linalg.eigsh(
+                        total_operator,
+                        k=band_count,
+                        which="SA",
+                        tol=self.eigensolver_tolerance,
+                        maxiter=self.eigensolver_maxiter,
+                    )
         else:
             total_matrix = np.array(hamiltonian_input, dtype=complex)
             eigenvalues, eigenvectors = np.linalg.eigh(total_matrix)

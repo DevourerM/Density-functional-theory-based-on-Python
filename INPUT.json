@@ -1,33 +1,33 @@
 {
-    "project_name": "graphene_c_sg15",
+    "project_name": "n2_molecule_sg15",
 
-    "lattice_constant": 2.46,
+    "lattice_constant": 8.0,
     "lattice_directions": [
         [1.0, 0.0, 0.0],
-        [-0.5, 0.86602540378, 0.0],
-        [0.0, 0.0, 6.0]
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0]
     ],
 
     "pos": [
-        ["C", 0.33333333, 0.66666667, 0.5],
-        ["C", 0.66666667, 0.33333333, 0.5]
+        ["N", 0.5, 0.5, 0.4314],
+        ["N", 0.5, 0.5, 0.5686]
     ],
 
-    "k_grid": [4, 4, 1],
+    "k_grid": [1, 1, 1],
 
     "xc_functional": "PBE",
     "pseudopotential_dir": "SG15-Version1p0_Pseudopotential/SG15_ONCV_v1.0_upf",
     "ionic_potential_scale": 1.0,
     "hartree_scale": 1.0,
     "xc_scale": 1.0,
-    "mixing_beta": 0.06,
-    "momentum_beta": 0.10,
-    "density_grid": [12, 12, 36],
+    "mixing_beta": 0.08,
+    "momentum_beta": 0.15,
+    "density_grid": [30, 30, 30],
     "nbands": 8,
     "eigensolver_tolerance": 1.0e-6,
-    "initial_density_noise_grid": [12, 12, 36],
+    "initial_density_noise_grid": [30, 30, 30],
     "initial_density_seed": 20260426,
-    "smearing_sigma": 0.05,
+    "smearing_sigma": 0.01,
     "save_result_json": false,
     "save_density_npy": false,
     "save_density_plot": false,
